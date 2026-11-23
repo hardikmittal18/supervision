@@ -140,6 +140,49 @@ jobs:
       - name: Run the test suite with PyTorch
         run: python -m pytest src/ tests/ --strict-markers -rs
 
+  lowest-deps:
+    name: Lowest declared dependencies (Python 3.10)
+    # The other jobs install from uv.lock, so they only ever see recent releases.
+    # This job installs the oldest version each `>=` floor in pyproject.toml allows,
+    # so a floor that is too low fails here instead of in a user's environment.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 📥 Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 🐍 Install uv and Python 3.10
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.10"
+          activate-environment: true
+
+      - name: 🚀 Install the lowest direct dependency versions
+        # Not `uv sync --frozen`: resolve fresh, ignoring uv.lock. scikit-learn is left
+        # out because no release that supports the dev group's floor installs next to
+        # the oldest NumPy, so its parity tests are skipped below.
+        run: |
+          uv pip install --resolution lowest-direct \
+            -e ".[metrics,coco]" \
+            "pytest>=7.2.2,<10" \
+            "faster-coco-eval>=1.8"
+
+      - name: 📋 Print installed packages
+        run: uv pip list
+
+      - name: 📦 Run the Import test
+        run: python -c "import supervision; from supervision import assets; from supervision import metrics; print(supervision.__version__)"
+
+      - name: 🧪 Run the test suite
+        # Old releases of transitive dependencies (e.g. matplotlib 3.6 with current
+        # pyparsing) emit DeprecationWarnings that the default config turns into errors.
+        run: >-
+          python -m pytest src/ tests/ -rs
+          -W "ignore::DeprecationWarning"
+          --ignore=tests/metrics/test_sklearn_parity.py
+
   clean-wheel:
     name: Clean Wheel on ${{ matrix.os }} / Python ${{ matrix.python-version }}
     timeout-minutes: 10
